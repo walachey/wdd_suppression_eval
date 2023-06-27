@@ -1,0 +1,7 @@
+matplotlib
+numpy
+pandas
+seaborn
+pytz
+tqdm
+bb_behavior
