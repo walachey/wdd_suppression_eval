@@ -210,9 +210,8 @@ def load_waggle_detection_metdata(
     return meta
 
 
-def parse_waggle_metadata_path(root_path: pathlib.Path, path: pathlib.Path):
-    subdir = path.relative_to(root_path)
-    parts = str(subdir).replace("\\", "/").split("/")
+def parse_waggle_metadata_path(path: pathlib.Path):
+    parts = str(path).replace("\\", "/").split("/")
 
     idx, minute, hour, day, month, year = map(int, parts[::-1][1:7])
 
@@ -232,8 +231,51 @@ def iterate_all_waggle_metadata_files(root_path: str):
             full_path = os.path.join(root, f)
             full_path = pathlib.Path(full_path)
 
-            dt, idx = parse_waggle_metadata_path(root_path, full_path)
+            dt, idx = parse_waggle_metadata_path(full_path)
             yield dict(metadata_path=full_path, metadata_timestamp=dt, dir_index=idx)
+
+
+def iterate_waggle_metadata_for_dates(root_path: str, min_date=None, max_date=None):
+    if min_date is None and max_date is None:
+        yield from iterate_all_waggle_metadata_files(root_path)
+        return
+
+    root_path = pathlib.Path(root_path)
+
+    all_subdirectories = []
+    # Manually iterate a few levels deep.
+    for cam_directory in os.listdir(root_path):
+        cam_directory = root_path / cam_directory
+        if not os.path.isdir(cam_directory):
+            continue
+
+        for year in os.listdir(cam_directory):
+            year_directory = cam_directory / year
+            if not os.path.isdir(year_directory):
+                continue
+            year = int(year)
+
+            for month in os.listdir(year_directory):
+                month_directory = year_directory / month
+                if not os.path.isdir(month_directory):
+                    continue
+                month = int(month)
+
+                for day in os.listdir(month_directory):
+                    day_directory = month_directory / day
+                    if not os.path.isdir(day_directory):
+                        continue
+                    day = int(day)
+
+                    date = datetime.date(year, month, day)
+                    if min_date is not None and date < min_date:
+                        continue
+                    if max_date is not None and date > max_date:
+                        continue
+                    all_subdirectories.append(day_directory)
+
+    for dir in all_subdirectories:
+        yield from iterate_all_waggle_metadata_files(dir)
 
 
 def iterate_waggle_metadata_for_schedule(root_path: str, schedule):
