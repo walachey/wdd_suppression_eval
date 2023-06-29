@@ -46,6 +46,8 @@ def load_experimental_config(comb_config_path, interval_duration):
         )
         if "current_sound_index" in entry:
             result["sound"] = entry["current_sound_index"]
+        if "current_soundboard_index" in entry:
+            result["soundboard"] = entry["current_soundboard_index"]
 
         schedule.append(result)
 
@@ -63,8 +65,10 @@ def load_experimental_config(comb_config_path, interval_duration):
             angle_deg=entry["angle_deg"],
             angle_tolerance=entry["angle_tolerance"],
         )
-        if "sound" in entry:
-            row["sound"] = entry["sound"]
+
+        for extrakey in ("sound", "soundboard"):
+            if extrakey in entry:
+                row[extrakey] = entry[extrakey]
 
         schedule.append(row)
 
@@ -74,7 +78,7 @@ def load_experimental_config(comb_config_path, interval_duration):
     return schedule
 
 
-def load_bridge_output(filepath):
+def load_bridge_output(filepath, min_date=None, max_date=None):
     labels = []
     all_lines = []
     with open(filepath, "r") as f:
@@ -85,9 +89,15 @@ def load_bridge_output(filepath):
                 print(str(e), line)
                 continue
 
-            data["log_timestamp"] = pytz.UTC.localize(
+            ts = pytz.UTC.localize(
                 datetime.datetime.fromisoformat(data["log_timestamp"])
             )
+            data["log_timestamp"] = ts
+
+            if min_date is not None and ts.date() < min_date:
+                continue
+            if max_date is not None and ts.date() > max_date:
+                continue
 
             all_lines.append(data)
             labels.append(data["message"])
