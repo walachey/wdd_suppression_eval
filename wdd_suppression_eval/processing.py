@@ -8,7 +8,7 @@ def aggregate_waggles_per_interval(
 ):
     waggles_per_interval = waggles_df.pivot_table(
         index=indices, values="waggle_id", aggfunc="count"
-    ).reset_index(level=(0, 1, 2))
+    ).reset_index(level=tuple(range(len(indices))))
     waggles_per_interval.columns = indices + ["number_of_waggles"]
     waggles_per_interval.head()
 
@@ -35,7 +35,7 @@ def count_number_of_waggles_for_schedules(
     ]
     long_form_df = schedule_merged_df.copy()
 
-    schedule_merged_df = schedule_merged_df[~schedule_merged_df.is_control]
+    schedule_merged_df = schedule_merged_df.loc[~schedule_merged_df.is_control]
     print(
         "{} control intervals and {} regular intervals".format(
             controls.shape[0], schedule_merged_df.shape[0]
@@ -55,9 +55,62 @@ def count_number_of_waggles_for_schedules(
     to_drop = pandas.isnull(schedule_merged_df.number_of_waggles) | pandas.isnull(
         schedule_merged_df.number_of_waggles_control
     )
-    print("Dropping {} / {} rows.".format(to_drop.sum(), schedule_merged_df.shape[0]))
-    schedule_merged_df = schedule_merged_df[~to_drop]
+    print(
+        "Dropping {} / {} rows with nans in either phase.".format(
+            to_drop.sum(), schedule_merged_df.shape[0]
+        )
+    )
+    schedule_merged_df = schedule_merged_df.loc[~to_drop]
 
+    threshold_perc = np.percentile(
+        schedule_merged_df.number_of_waggles_control.values, 5
+    )
+    threshold = max(20, threshold_perc)
+    to_drop = schedule_merged_df.number_of_waggles_control < threshold
+    print(
+        "Dropping {} / {} rows with too few waggles. Threshold: {}, Control 5th percentile: {}".format(
+            to_drop.sum(), schedule_merged_df.shape[0], threshold, threshold_perc
+        )
+    )
+    schedule_merged_df = schedule_merged_df.loc[~to_drop]
+
+    # Calculate which combinations of ID and additional indices we dropped along the way, so we can
+    # replicate it for the long form dataframe.
+
+    retained_intervals = set(
+        (
+            tuple(t)
+            for t in schedule_merged_df[["interval_id"] + additional_index].itertuples(
+                index=False
+            )
+        )
+    ) | set(
+        (
+            tuple(t)
+            for t in schedule_merged_df[
+                ["interval_id_control"] + additional_index
+            ].itertuples(index=False)
+        )
+    )
+
+    to_drop = np.array(
+        [
+            (not (tuple(r) in retained_intervals))
+            for r in long_form_df[["interval_id"] + additional_index].itertuples(
+                index=False
+            )
+        ],
+        dtype=bool,
+    )
+
+    print(
+        "Dropping {} / {} rows from long form.".format(
+            to_drop.sum(), long_form_df.shape[0]
+        )
+    )
+    long_form_df = long_form_df.loc[~to_drop]
+
+    # Calculate reduction metric.
     schedule_merged_df["waggle_number_reduction_factor"] = (
         schedule_merged_df["number_of_waggles"]
         / schedule_merged_df["number_of_waggles_control"]
@@ -68,26 +121,5 @@ def count_number_of_waggles_for_schedules(
         sns.histplot(schedule_merged_df.number_of_waggles, binwidth=10)
         sns.histplot(schedule_merged_df.number_of_waggles_control, binwidth=10)
         plt.show()
-
-    threshold_perc, threshold_perc2 = np.percentile(
-        schedule_merged_df.number_of_waggles_control.values, (2.5, 5)
-    )
-    to_drop = schedule_merged_df.number_of_waggles_control < threshold_perc
-    print(
-        "Dropping {} / {} rows with too few waggles. Control percentiles: {}".format(
-            to_drop.sum(), schedule_merged_df.shape[0], threshold_perc
-        )
-    )
-
-    valid_intervals = set(schedule_merged_df.interval_id) | set(
-        schedule_merged_df.interval_id_control
-    )
-    to_drop = ~long_form_df.interval_id.isin(valid_intervals)
-    print(
-        "Dropping {} / {} rows from long form.".format(
-            to_drop.sum(), long_form_df.shape[0]
-        )
-    )
-    long_form_df = long_form_df[~to_drop]
 
     return long_form_df, schedule_merged_df
