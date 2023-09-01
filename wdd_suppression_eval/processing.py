@@ -30,10 +30,12 @@ def count_number_of_waggles_for_schedules(
     schedule_merged_df = pandas.merge(
         schedule_df, waggle_counts_df, how="left", on="interval_id"
     )
+
     controls = schedule_merged_df[schedule_merged_df.is_control][
         ["interval_id", "control_for", "number_of_waggles"] + additional_index
     ]
     long_form_df = schedule_merged_df.copy()
+    long_form_df = long_form_df[~pandas.isnull(long_form_df.number_of_waggles)]
 
     schedule_merged_df = schedule_merged_df.loc[~schedule_merged_df.is_control]
     print(
@@ -68,11 +70,12 @@ def count_number_of_waggles_for_schedules(
     threshold = max(20, threshold_perc)
     to_drop = schedule_merged_df.number_of_waggles_control < threshold
     print(
-        "Dropping {} / {} rows with too few waggles. Threshold: {}, Control 5th percentile: {}".format(
+        "Deselecting {} / {} rows with too few waggles. Threshold: {}, Control 5th percentile: {}".format(
             to_drop.sum(), schedule_merged_df.shape[0], threshold, threshold_perc
         )
     )
-    schedule_merged_df = schedule_merged_df.loc[~to_drop]
+    schedule_merged_df["too_few_data_points_in_control"] = to_drop
+    schedule_merged_df_valid_intervals = schedule_merged_df.loc[~to_drop]
 
     # Calculate which combinations of ID and additional indices we dropped along the way, so we can
     # replicate it for the long form dataframe.
@@ -80,14 +83,14 @@ def count_number_of_waggles_for_schedules(
     retained_intervals = set(
         (
             tuple(t)
-            for t in schedule_merged_df[["interval_id"] + additional_index].itertuples(
-                index=False
-            )
+            for t in schedule_merged_df_valid_intervals[
+                ["interval_id"] + additional_index
+            ].itertuples(index=False)
         )
     ) | set(
         (
             tuple(t)
-            for t in schedule_merged_df[
+            for t in schedule_merged_df_valid_intervals[
                 ["interval_id_control"] + additional_index
             ].itertuples(index=False)
         )
@@ -104,16 +107,26 @@ def count_number_of_waggles_for_schedules(
     )
 
     print(
-        "Dropping {} / {} rows from long form.".format(
+        "Deselecting {} / {} rows from long form.".format(
             to_drop.sum(), long_form_df.shape[0]
         )
     )
-    long_form_df = long_form_df.loc[~to_drop]
+    long_form_df["too_few_data_points_in_control"] = to_drop
 
     # Calculate reduction metric.
     schedule_merged_df["waggle_number_reduction_factor"] = (
-        schedule_merged_df["number_of_waggles"]
-        / schedule_merged_df["number_of_waggles_control"]
+        schedule_merged_df.number_of_waggles.values
+        / schedule_merged_df.number_of_waggles_control.values
+    )
+
+    schedule_merged_df["waggle_number_change"] = (
+        schedule_merged_df.number_of_waggles.values
+        - schedule_merged_df.number_of_waggles_control.values
+    )
+    schedule_merged_df["waggle_number_change_sign"] = np.clip(
+        schedule_merged_df.waggle_number_change.values,
+        -1,
+        1,
     )
 
     if False:
