@@ -40,6 +40,7 @@ def load_experimental_config(comb_config_path, interval_duration):
             end=to_dt,
             is_active=is_active,
             is_control=False,
+            rule=entry["rule"],
             control_for=-1,
             angle_deg=entry["angle_deg"],
             angle_tolerance=experiment_angular_tolerance,
@@ -61,6 +62,7 @@ def load_experimental_config(comb_config_path, interval_duration):
             end=entry["end"] - interval_delta,
             is_active=False,
             is_control=True,
+            rule=entry["rule"],
             control_for=entry["interval_id"],
             angle_deg=entry["angle_deg"],
             angle_tolerance=entry["angle_tolerance"],
@@ -235,10 +237,18 @@ def iterate_all_waggle_metadata_files(root_path: str):
             yield dict(metadata_path=full_path, metadata_timestamp=dt, dir_index=idx)
 
 
-def iterate_waggle_metadata_for_dates(root_path: str, min_date=None, max_date=None):
-    if min_date is None and max_date is None:
+def iterate_waggle_metadata_for_dates(
+    root_path: str, min_date=None, max_date=None, dates=None
+):
+    if min_date is None and max_date is None and dates is None:
         yield from iterate_all_waggle_metadata_files(root_path)
         return
+    if (min_date is not None or max_date is not None) and dates is not None:
+        raise ValueError(
+            "Either any of min_date/max_date OR dates can be passed as arguments."
+        )
+    if dates is not None:
+        dates = set(dates)
 
     root_path = pathlib.Path(root_path)
 
@@ -268,10 +278,14 @@ def iterate_waggle_metadata_for_dates(root_path: str, min_date=None, max_date=No
                     day = int(day)
 
                     date = datetime.date(year, month, day)
-                    if min_date is not None and date < min_date:
-                        continue
-                    if max_date is not None and date > max_date:
-                        continue
+                    if dates is not None:
+                        if date not in dates:
+                            continue
+                    else:
+                        if min_date is not None and date < min_date:
+                            continue
+                        if max_date is not None and date > max_date:
+                            continue
                     all_subdirectories.append(day_directory)
 
     for dir in all_subdirectories:
@@ -279,7 +293,9 @@ def iterate_waggle_metadata_for_dates(root_path: str, min_date=None, max_date=No
 
 
 def iterate_waggle_metadata_for_schedule(root_path: str, schedule):
-    for meta in iterate_all_waggle_metadata_files(root_path):
+    for meta in iterate_waggle_metadata_for_dates(
+        root_path, dates=schedule.date.values
+    ):
         timestamp = meta["metadata_timestamp"]
         fit = schedule[(schedule.begin <= timestamp) & (schedule.end > timestamp)]
 
@@ -294,12 +310,12 @@ def iterate_waggle_metadata_for_schedule(root_path: str, schedule):
         yield meta
 
 
-def load_and_parse_all_waggle_metadata(path_generator, **kwargs):
+def load_and_parse_all_waggle_metadata(path_generator, filter_class="waggle", **kwargs):
     for meta in path_generator:
         path = meta["metadata_path"]
         del meta["metadata_path"]
         waggle_metadata = load_waggle_detection_metdata(
-            path, filter_class="waggle", **kwargs
+            path, filter_class=filter_class, **kwargs
         )
         if waggle_metadata is None:
             continue
@@ -313,6 +329,9 @@ def load_waggle_metadata_dataframe(
     all_waggle_metadata = list(
         load_and_parse_all_waggle_metadata(path_generator, **kwargs)
     )
+
+    if len(all_waggle_metadata) == 0:
+        return None
 
     waggles_df = pandas.DataFrame(all_waggle_metadata)
 
