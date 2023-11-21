@@ -128,14 +128,26 @@ def plot_results_for(long_form_df, schedule_merged_df, additional_index=None):
         plt.setp(ax.artists, edgecolor="k", facecolor="w")
         plt.setp(ax.lines, color="k")
 
-    if "hue_order" in additional_kws:
-        additional_values = []
-        for sound_index, (sound, sound_df) in enumerate(
-            schedule_merged_df[["sound", additional_index]]
-            .drop_duplicates()
-            .groupby("sound")
-        ):
-            n_hues = sound_df.shape[0]
+    additional_values = []
+    grouping_df = (
+        schedule_merged_df[["sound", additional_index]]
+        if additional_index
+        else schedule_merged_df[["sound"]]
+    )
+    for sound_index, (sound, sound_df) in enumerate(
+        grouping_df.drop_duplicates().groupby("sound")
+    ):
+        n_hues = sound_df.shape[0]
+
+        def test_dataframe(df):
+            vals = df.waggle_number_change_sign.values
+            vals = vals[vals != 0]
+            n_trials = vals.shape[0]
+            n_successes = (vals < 0).sum()
+            p_value = scipy.stats.binom_test(n_successes, n_trials)
+            return p_value
+
+        if "hue_order" in additional_kws:
             hue_step = boxes_width / len(additional_kws["hue_order"])
             hue_offset = -n_hues / 2 * hue_step
             for hue in additional_kws["hue_order"]:
@@ -143,35 +155,37 @@ def plot_results_for(long_form_df, schedule_merged_df, additional_index=None):
                 hue_df = hue_df[hue_df[additional_index] == hue]
                 if hue_df.empty:
                     continue
-                vals = hue_df.waggle_number_change_sign.values
-                vals = vals[vals != 0]
-                n_trials = vals.shape[0]
-                n_successes = (vals < 0).sum()
-                p_value = scipy.stats.binom_test(n_successes, n_trials)
+                p_value = test_dataframe(hue_df)
 
                 axis_coordinate = sound_index + hue_offset + hue_step / 2.0
                 hue_offset += hue_step
-                additional_values.append((axis_coordinate, sound, hue, p_value))
-        additional_values = pandas.DataFrame(
-            additional_values, columns=["x", "sound", additional_index, "p_value"]
+                additional_values.append((axis_coordinate, sound, p_value, hue))
+        else:
+            sound_df = schedule_merged_df[schedule_merged_df.sound == sound]
+            p_value = test_dataframe(sound_df)
+            additional_values.append((sound_index, sound, p_value))
+
+    columns = ["x", "sound", "p_value"]
+    if additional_index:
+        columns += [additional_index]
+    additional_values = pandas.DataFrame(additional_values, columns=columns)
+
+    for x, p in additional_values[["x", "p_value"]].itertuples(index=False):
+        text = ""
+        if p < 0.01:
+            text = "***"
+        elif p < 0.05:
+            text = "**"
+        elif p < 0.1:
+            text = "*"
+        else:
+            continue
+
+        trans = matplotlib.transforms.blended_transform_factory(
+            ax.transData, ax.transAxes
         )
-
-        for x, p in additional_values[["x", "p_value"]].itertuples(index=False):
-            text = ""
-            if p < 0.1:
-                text = "*"
-            elif p < 0.05:
-                text = "**"
-            elif p < 0.01:
-                text = "***"
-            else:
-                continue
-
-            trans = matplotlib.transforms.blended_transform_factory(
-                ax.transData, ax.transAxes
-            )
-            ax.text(x, 1.0, s=text, transform=trans, horizontalalignment="center")
-            ax.axvline(x, linewidth=0.5, linestyle=":", color="gray", zorder=-100)
+        ax.text(x, 1.0, s=text, transform=trans, horizontalalignment="center")
+        ax.axvline(x, linewidth=0.5, linestyle=":", color="gray", zorder=-100)
     print(additional_values)
 
     plt.axhline(0.0, linestyle=":", color="gray", alpha=0.5)
