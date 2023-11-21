@@ -391,23 +391,82 @@ def load_waggle_metadata_dataframe(
     waggles_df["was_clustered_to_dance"] = waggles_df.dance_id != -1
 
     if schedule_df is not None:
-        angles_df = schedule_df[["interval_id", "angle_deg", "angle_tolerance"]]
-        angles_df.columns = [
-            "interval_id",
-            "suppression_angle_deg",
-            "suppression_angle_tolerance_deg",
-        ]
-        waggles_df = pandas.merge(waggles_df, angles_df, how="left", on="interval_id")
-        assert waggles_df[pandas.isnull(waggles_df.suppression_angle_deg)].empty
-
-        angular_distance = (
-            np.abs(waggles_df.world_angle_deg - waggles_df.suppression_angle_deg) % 360
-        )
-        angular_distance2 = np.abs(360 - angular_distance) % 360
-        angular_distance = np.min(
-            np.stack([angular_distance, angular_distance2], axis=1), axis=1
-        )
-        waggles_df["was_suppression_target"] = (
-            angular_distance <= waggles_df.suppression_angle_tolerance_deg.values
-        )
+        waggles_df = merge_with_schedule_dataframe(waggles_df, schedule_df)
     return waggles_df
+
+
+def merge_with_schedule_dataframe(
+    waggles_df, schedule_df, drop_waggles_outside_of_intervals=True
+):
+    if "interval_id" not in waggles_df.columns:
+        ids = []
+        for timestamp in waggles_df.timestamp_begin:
+            fit = schedule_df[
+                (schedule_df.begin <= timestamp) & (schedule_df.end > timestamp)
+            ]
+            if not fit.empty:
+                ids.append(fit.interval_id.iloc[0])
+            else:
+                ids.append(None)
+        waggles_df["interval_id"] = ids
+
+    if drop_waggles_outside_of_intervals:
+        waggles_df = waggles_df[~pandas.isnull(waggles_df.interval_id.values)]
+
+    angles_df = schedule_df[["interval_id", "angle_deg", "angle_tolerance"]]
+    angles_df.columns = [
+        "interval_id",
+        "suppression_angle_deg",
+        "suppression_angle_tolerance_deg",
+    ]
+    waggles_df = pandas.merge(waggles_df, angles_df, how="left", on="interval_id")
+    assert waggles_df[pandas.isnull(waggles_df.suppression_angle_deg)].empty
+
+    angular_distance = (
+        np.abs(waggles_df.world_angle_deg - waggles_df.suppression_angle_deg) % 360
+    )
+    angular_distance2 = np.abs(360 - angular_distance) % 360
+    angular_distance = np.min(
+        np.stack([angular_distance, angular_distance2], axis=1), axis=1
+    )
+    waggles_df["was_suppression_target"] = (
+        angular_distance <= waggles_df.suppression_angle_tolerance_deg.values
+    )
+    return waggles_df
+
+
+def load_pickled_dataframe_for_date_from_cache(root_path, date):
+    files = os.listdir(root_path)
+    date = date.isoformat()
+    files = [f for f in files if ((date in f) and f.endswith("pickle"))]
+    if len(files) == 0:
+        return None
+    if len(files) > 1:
+        raise ValueError("Found multiple files for date {}".format(date))
+    return pandas.read_pickle(os.path.join(root_path, files[0]))
+
+
+def load_pickled_dataframe_for_dates_from_cache(
+    root_path, min_date=None, max_date=None, dates=None, schedule_df=None
+):
+    if dates is None:
+        dates = []
+        date = min_date
+        while date <= max_date:
+            dates.append(date)
+            date += datetime.timedelta(days=1)
+    dates = list(sorted(set(dates)))
+
+    all_dataframes = []
+    for date in dates:
+        df = load_pickled_dataframe_for_date_from_cache(root_path, date)
+        if df is None or df.empty:
+            print("No data found for {}".format(date.isoformat()))
+        else:
+            all_dataframes.append(df)
+
+    all_data = pandas.concat(all_dataframes, axis=0)
+    all_data.sort_values("timestamp_begin", inplace=True)
+    if schedule_df is not None:
+        all_data = merge_with_schedule_dataframe(all_data, schedule_df)
+    return all_data
